@@ -4,7 +4,6 @@ import android.content.Context;
 
 import androidx.appcompat.app.AppCompatActivity;
 
-import com.winlator.MainActivity;
 import com.winlator.R;
 import com.winlator.SettingsFragment;
 import com.winlator.container.Container;
@@ -44,7 +43,11 @@ public abstract class RootFSInstaller {
         }
     }
 
-    public static void install(final MainActivity activity) {
+    public static void install(final AppCompatActivity activity) {
+        install(activity, null);
+    }
+
+    public static void install(final AppCompatActivity activity, final Runnable onSuccess) {
         AppUtils.keepScreenOn(activity);
         RootFS rootFS = RootFS.find(activity);
         final File rootDir = rootFS.getRootDir();
@@ -70,6 +73,7 @@ public abstract class RootFSInstaller {
             if (success) {
                 rootFS.createRFSVersionFile(LATEST_VERSION);
                 resetContainerRFSVersions(activity);
+                if (onSuccess != null) activity.runOnUiThread(onSuccess);
             }
             else AppUtils.showToast(activity, R.string.unable_to_install_system_files);
 
@@ -77,7 +81,12 @@ public abstract class RootFSInstaller {
         });
     }
 
-    public static void installIfNeeded(final MainActivity activity) {
+    public static boolean isInstallNeeded(final AppCompatActivity activity) {
+        RootFS rootFS = RootFS.find(activity);
+        return !rootFS.isValid() || rootFS.getVersion() < LATEST_VERSION;
+    }
+
+    public static void installIfNeeded(final AppCompatActivity activity) {
         RootFS rootFS = RootFS.find(activity);
         if (!rootFS.isValid() || rootFS.getVersion() < LATEST_VERSION) install(activity);
     }
