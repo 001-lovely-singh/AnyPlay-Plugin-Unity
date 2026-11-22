@@ -24,18 +24,15 @@
         android:allowAudioPlaybackCapture="true"
         android:label="@string/app_name">
 
+        <!-- Winlator ki purani UI: LAUNCHER hata diya, ab app drawer mein icon nahi aayega
+             aur ye bahar se khul nahi sakti. -->
         <activity android:name="com.winlator.MainActivity"
             android:theme="@style/AppThemeDark"
-            android:exported="true"
+            android:exported="false"
             android:screenOrientation="sensor"
-            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|density|navigation">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN"/>
-                <category android:name="android.intent.category.LAUNCHER"/>
-            </intent-filter>
-        </activity>
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|density|navigation" />
 
-        <!-- Any Play yahin Intent bhejta hai: seedha game launch (UI nahi dikhti) -->
+        <!-- Any Play yahin Intent bhejta hai: seedha game launch. Launcher icon nahi hai. -->
         <activity android:name="com.winlator.LaunchActivity"
             android:theme="@style/AppThemeFullscreenDark"
             android:exported="true"
@@ -44,7 +41,7 @@
             android:screenOrientation="sensorLandscape"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|density|navigation">
             <intent-filter>
-                <action android:name="com.anyplay.unity.LAUNCH"/>
+                <action android:name="com.anyplay.unityplugin.action.RUN_GAME"/>
                 <category android:name="android.intent.category.DEFAULT"/>
             </intent-filter>
         </activity>
