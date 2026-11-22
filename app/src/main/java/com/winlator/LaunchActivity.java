@@ -5,6 +5,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.Gravity;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -19,6 +20,7 @@ import androidx.core.content.ContextCompat;
 
 import com.winlator.container.Container;
 import com.winlator.container.ContainerManager;
+import com.winlator.container.GraphicsDrivers;
 import com.winlator.core.AppUtils;
 import com.winlator.xenvironment.RootFSInstaller;
 
@@ -45,9 +47,11 @@ public class LaunchActivity extends AppCompatActivity {
     private static final String DEFAULT_SCREEN_SIZE = "1280x720";
     private static final String DEFAULT_BOX64_PRESET = "STABILITY";
     private static final int PERMISSION_REQUEST_CODE = 100;
+    private static final String TAG = "AnyPlayUnity";
 
     private String gamePath;
     private String gameZip;
+    private String gameDirExtra;
     private String gameArgs;
     private String screenSize;
     private String box64Preset;
@@ -75,13 +79,7 @@ public class LaunchActivity extends AppCompatActivity {
             if (exe != null) gamePath = exe.getPath();
         }
 
-        boolean zipOk = gameZip != null && (new File(gameZip)).isFile();
-        boolean exeOk = gamePath != null && (new File(gamePath)).isFile();
-        if (!zipOk && !exeOk) {
-            Toast.makeText(this, "Game file nahi mili", Toast.LENGTH_LONG).show();
-            finish();
-            return;
-        }
+        gameDirExtra = gameDir;
 
         if (screenSize == null || !screenSize.matches("\\d{3,4}x\\d{3,4}")) screenSize = DEFAULT_SCREEN_SIZE;
         if (box64Preset == null || box64Preset.isEmpty()) box64Preset = DEFAULT_BOX64_PRESET;
@@ -93,6 +91,22 @@ public class LaunchActivity extends AppCompatActivity {
                 PERMISSION_REQUEST_CODE);
         }
         else prepare();
+    }
+
+    /** Storage permission milne ke BAAD check karte hain, warna isFile() hamesha false aata hai. */
+    private boolean gameFilesOk() {
+        if (gameZip == null && (gamePath == null || gamePath.isEmpty()) && gameDirExtra != null) {
+            File exe = UnityZipExtractor.locateExe(new File(gameDirExtra));
+            if (exe != null) gamePath = exe.getPath();
+        }
+        boolean zipOk = gameZip != null && (new File(gameZip)).isFile();
+        boolean exeOk = gamePath != null && (new File(gamePath)).isFile();
+        if (!zipOk && !exeOk) {
+            Log.e(TAG, "Game file nahi mili. zip=" + gameZip + " exe=" + gamePath + " dir=" + gameDirExtra);
+            Toast.makeText(this, "Game file nahi mili", Toast.LENGTH_LONG).show();
+            return false;
+        }
+        return true;
     }
 
     @Override
@@ -115,6 +129,11 @@ public class LaunchActivity extends AppCompatActivity {
     private void prepare() {
         if (started) return;
         started = true;
+
+        if (!gameFilesOk()) {
+            finish();
+            return;
+        }
 
         if (RootFSInstaller.isInstallNeeded(this)) {
             setStatus("Pehli baar setup ho raha hai...");
@@ -157,6 +176,7 @@ public class LaunchActivity extends AppCompatActivity {
                     });
                 }
                 catch (final Exception e) {
+                    Log.e(TAG, "Zip extract failed: " + zip, e);
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
@@ -191,6 +211,7 @@ public class LaunchActivity extends AppCompatActivity {
             data.put("name", CONTAINER_NAME);
             data.put("screenSize", screenSize);
             data.put("box64Preset", box64Preset);
+            data.put("graphicsDriver", GraphicsDrivers.getDefaultDriver(this));
             manager.createContainerAsync(data, this::launchGame);
         }
         catch (Exception e) {
@@ -212,6 +233,9 @@ public class LaunchActivity extends AppCompatActivity {
 
         container.setScreenSize(screenSize);
         container.setBox64Preset(box64Preset);
+        // Adreno phone pe Turnip (Winlator ka apna default). Pehle bane container mein Vortek reh gaya ho to use bhi theek karo.
+        String wantedDriver = GraphicsDrivers.getDefaultDriver(this);
+        if (!wantedDriver.equals(container.getGraphicsDriver())) container.setGraphicsDriver(wantedDriver);
         container.setDrives(drives);
         container.saveData();
 
