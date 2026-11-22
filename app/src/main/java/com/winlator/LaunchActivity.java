@@ -29,15 +29,16 @@ import java.io.File;
 /**
  * Any Play se aane wala entry point. UI nahi dikhata, sirf loading screen.
  *
- * Intent action : com.anyplay.unity.LAUNCH
- * Extras:
- *   game_path   (String, zaruri) -> Game.exe ka full path, jaise /storage/emulated/0/Games/MyGame/Game.exe
+ * Intent action : com.anyplay.unityplugin.action.RUN_GAME
+ * Extras (Any Play "game_dir" bhejta hai):
+ *   game_dir    (String) -> game ka folder (jisme Game.exe aur Game_Data hai). Exe plugin khud dhundta hai.
+ *   game_path   (String, optional) -> agar exe ka full path pehle se pata ho
  *   game_args   (String, optional) -> Unity launch flags
  *   screen_size (String, optional) -> default "1280x720"
  *   box64_preset(String, optional) -> default "STABILITY"
  */
 public class LaunchActivity extends AppCompatActivity {
-    public static final String ACTION_LAUNCH = "com.anyplay.unity.LAUNCH";
+    public static final String ACTION_LAUNCH = "com.anyplay.unityplugin.action.RUN_GAME";
     private static final String CONTAINER_NAME = "AnyPlayUnity";
     private static final String DEFAULT_SCREEN_SIZE = "1280x720";
     private static final String DEFAULT_BOX64_PRESET = "STABILITY";
@@ -59,6 +60,11 @@ public class LaunchActivity extends AppCompatActivity {
 
         Intent intent = getIntent();
         gamePath = intent.getStringExtra("game_path");
+        String gameDir = intent.getStringExtra("game_dir");
+        if ((gamePath == null || gamePath.isEmpty()) && gameDir != null) {
+            File exe = findUnityExe(new File(gameDir));
+            if (exe != null) gamePath = exe.getPath();
+        }
         gameArgs = intent.getStringExtra("game_args");
         screenSize = intent.getStringExtra("screen_size");
         box64Preset = intent.getStringExtra("box64_preset");
@@ -161,6 +167,24 @@ public class LaunchActivity extends AppCompatActivity {
         intent.putExtra("exec_args", gameArgs);
         startActivity(intent);
         finish();
+    }
+
+    /** Unity PC build ka asli exe: UnityCrashHandler nahi, aur jiska <naam>_Data folder ho. */
+    private static File findUnityExe(File dir) {
+        File[] files = dir.listFiles();
+        if (files == null) return null;
+        File fallback = null;
+        for (File f : files) {
+            String name = f.getName();
+            String lower = name.toLowerCase();
+            if (!f.isFile() || !lower.endsWith(".exe") || lower.startsWith("unitycrashhandler")) continue;
+            String dataName = lower.substring(0, lower.length() - 4) + "_data";
+            for (File d : files) {
+                if (d.isDirectory() && d.getName().toLowerCase().equals(dataName)) return f;
+            }
+            if (fallback == null) fallback = f;
+        }
+        return fallback;
     }
 
     private void setStatus(String text) {
