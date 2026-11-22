@@ -30,9 +30,11 @@ import java.io.File;
  * Any Play se aane wala entry point. UI nahi dikhata, sirf loading screen.
  *
  * Intent action : com.anyplay.unityplugin.action.RUN_GAME
- * Extras (Any Play "game_dir" bhejta hai):
+ * Extras (ek hi chahiye):
  *   game_dir    (String) -> game ka folder (jisme Game.exe aur Game_Data hai). Exe plugin khud dhundta hai.
+ *   game_zip    (String) -> game ka .zip. Plugin use apne storage mein ek baar kholta hai (cache), phir chalata hai.
  *   game_path   (String, optional) -> agar exe ka full path pehle se pata ho
+ *   game_title  (String, optional)
  *   game_args   (String, optional) -> Unity launch flags
  *   screen_size (String, optional) -> default "1280x720"
  *   box64_preset(String, optional) -> default "STABILITY"
@@ -45,6 +47,7 @@ public class LaunchActivity extends AppCompatActivity {
     private static final int PERMISSION_REQUEST_CODE = 100;
 
     private String gamePath;
+    private String gameZip;
     private String gameArgs;
     private String screenSize;
     private String box64Preset;
@@ -60,17 +63,22 @@ public class LaunchActivity extends AppCompatActivity {
 
         Intent intent = getIntent();
         gamePath = intent.getStringExtra("game_path");
-        String gameDir = intent.getStringExtra("game_dir");
-        if ((gamePath == null || gamePath.isEmpty()) && gameDir != null) {
-            File exe = findUnityExe(new File(gameDir));
-            if (exe != null) gamePath = exe.getPath();
-        }
+        gameZip = intent.getStringExtra("game_zip");
         gameArgs = intent.getStringExtra("game_args");
         screenSize = intent.getStringExtra("screen_size");
         box64Preset = intent.getStringExtra("box64_preset");
 
-        if (gamePath == null || gamePath.isEmpty() || !(new File(gamePath)).isFile()) {
-            Toast.makeText(this, "Game file nahi mili: " + gamePath, Toast.LENGTH_LONG).show();
+        String gameDir = intent.getStringExtra("game_dir");
+        if (gameZip != null && gameZip.isEmpty()) gameZip = null;
+        if (gameZip == null && (gamePath == null || gamePath.isEmpty()) && gameDir != null) {
+            File exe = UnityZipExtractor.locateExe(new File(gameDir));
+            if (exe != null) gamePath = exe.getPath();
+        }
+
+        boolean zipOk = gameZip != null && (new File(gameZip)).isFile();
+        boolean exeOk = gamePath != null && (new File(gamePath)).isFile();
+        if (!zipOk && !exeOk) {
+            Toast.makeText(this, "Game file nahi mili", Toast.LENGTH_LONG).show();
             finish();
             return;
         }
@@ -110,9 +118,55 @@ public class LaunchActivity extends AppCompatActivity {
 
         if (RootFSInstaller.isInstallNeeded(this)) {
             setStatus("Pehli baar setup ho raha hai...");
-            RootFSInstaller.install(this, this::prepareContainer);
+            RootFSInstaller.install(this, this::resolveGame);
         }
-        else prepareContainer();
+        else resolveGame();
+    }
+
+    /** Zip ho to pehle cache mein kholo (background thread), phir container + launch. */
+    private void resolveGame() {
+        if (gameZip == null) {
+            prepareContainer();
+            return;
+        }
+        setStatus("Game taiyar ho raha hai (pehli baar zip khulta hai)...");
+        final File zip = new File(gameZip);
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    File root = UnityZipExtractor.prepare(LaunchActivity.this, zip, new UnityZipExtractor.Progress() {
+                        @Override
+                        public void onPercent(final int percent) {
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    setStatus("Game khul raha hai... " + percent + "%");
+                                }
+                            });
+                        }
+                    });
+                    final File exe = UnityZipExtractor.locateExe(root);
+                    if (exe == null) throw new java.io.IOException("Zip ke andar Unity game (.exe) nahi mila");
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            gamePath = exe.getPath();
+                            prepareContainer();
+                        }
+                    });
+                }
+                catch (final Exception e) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            Toast.makeText(LaunchActivity.this, "Zip nahi khul paya: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                            finish();
+                        }
+                    });
+                }
+            }
+        }).start();
     }
 
     private void prepareContainer() {
@@ -167,24 +221,6 @@ public class LaunchActivity extends AppCompatActivity {
         intent.putExtra("exec_args", gameArgs);
         startActivity(intent);
         finish();
-    }
-
-    /** Unity PC build ka asli exe: UnityCrashHandler nahi, aur jiska <naam>_Data folder ho. */
-    private static File findUnityExe(File dir) {
-        File[] files = dir.listFiles();
-        if (files == null) return null;
-        File fallback = null;
-        for (File f : files) {
-            String name = f.getName();
-            String lower = name.toLowerCase();
-            if (!f.isFile() || !lower.endsWith(".exe") || lower.startsWith("unitycrashhandler")) continue;
-            String dataName = lower.substring(0, lower.length() - 4) + "_data";
-            for (File d : files) {
-                if (d.isDirectory() && d.getName().toLowerCase().equals(dataName)) return f;
-            }
-            if (fallback == null) fallback = f;
-        }
-        return fallback;
     }
 
     private void setStatus(String text) {
