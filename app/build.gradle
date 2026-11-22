@@ -12,7 +12,30 @@ android {
         versionName "11.2"
     }
 
+    signingConfigs {
+        release {
+            def ksFile = System.getenv("ANYPLAY_KEYSTORE_FILE")
+            if (ksFile) {
+                storeFile file(ksFile)
+                storePassword System.getenv("ANYPLAY_STORE_PASSWORD")
+                keyAlias System.getenv("ANYPLAY_KEY_ALIAS")
+                keyPassword System.getenv("ANYPLAY_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
+        release {
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // Keystore secret ho to wahi, warna debug key (installable, lekin har build ki key alag).
+            signingConfig System.getenv("ANYPLAY_KEYSTORE_FILE") ? signingConfigs.release : signingConfigs.debug
+
+            ndk {
+                abiFilters 'arm64-v8a'
+            }
+        }
+
         debug {
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
