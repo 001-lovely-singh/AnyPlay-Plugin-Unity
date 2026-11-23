@@ -159,6 +159,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         ProcessHelper.removeAllDebugCallbacks();
         boolean enableLogs = preferences.getBoolean("enable_wine_debug", false) || preferences.getInt("box64_logs", 0) >= 1;
         if (enableLogs) ProcessHelper.addDebugCallback(debugDialog = new DebugDialog(this));
+        AnyPlayLog.attachToProcessOutput();
         Menu menu = navigationView.getMenu();
         menu.findItem(R.id.menu_item_logs).setVisible(enableLogs);
         navigationView.setNavigationItemSelectedListener(this);
@@ -347,14 +348,15 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         super.onDestroy();
     }
 
+    private android.app.Dialog closeGameDialog;
+
     @Override
     public void onBackPressed() {
-        if (environment != null) {
-            if (!drawerLayout.isDrawerOpen(GravityCompat.START)) {
-                drawerLayout.openDrawer(GravityCompat.START);
-            }
-            else drawerLayout.closeDrawers();
+        if (closeGameDialog != null && closeGameDialog.isShowing()) {
+            closeGameDialog.dismiss();
+            return;
         }
+        closeGameDialog = CloseGameDialog.show(this, this::exit);
     }
 
     @Override
@@ -430,16 +432,9 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     private void exit() {
         winHandler.stop();
         if (environment != null) environment.stopEnvironmentComponents();
-
-        Intent intent = getIntent();
-        if (intent.hasExtra("exec_path")) {
-            AppUtils.RestartApplicationOptions options = new AppUtils.RestartApplicationOptions();
-            options.containerId = container.id;
-            options.startPath = FileUtils.getDirname(intent.getStringExtra("exec_path"));
-            AppUtils.restartApplication(this, options);
-        }
-        else AppUtils.restartApplication(this);
         ForegroundService.stopSession(this);
+        finishAndRemoveTask();
+        Runtime.getRuntime().exit(0);
     }
 
     private void setupWineSystemFiles() {
@@ -966,6 +961,8 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
             Intent intent = getIntent();
             if (intent.hasExtra("exec_path")) {
                 execPath = WineUtils.unixToDOSPath(intent.getStringExtra("exec_path"), container);
+                String extraArgs = intent.getStringExtra("exec_args");
+                if (extraArgs != null && !extraArgs.trim().isEmpty()) execArgs = " "+extraArgs.trim();
 
                 if (execPath.endsWith(".lnk")) {
                     cmdArgs = "\""+execPath+"\"";
