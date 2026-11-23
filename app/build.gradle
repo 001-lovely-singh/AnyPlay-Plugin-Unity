@@ -8,7 +8,8 @@ android {
         applicationId 'com.anyplay.unityplugin'
         minSdkVersion 26
         targetSdkVersion 28
-        versionCode 33
+        // Every CI build gets a higher versionCode, so a new APK installs over the old one.
+        versionCode System.getenv("GITHUB_RUN_NUMBER") ? 1000 + System.getenv("GITHUB_RUN_NUMBER").toInteger() : 33
         versionName "11.2"
     }
 
@@ -28,7 +29,7 @@ android {
         release {
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-            // Keystore secret ho to wahi, warna debug key (installable, lekin har build ki key alag).
+            // Uses the release keystore from the GitHub secrets; falls back to the debug key (a different key on every CI run).
             signingConfig System.getenv("ANYPLAY_KEYSTORE_FILE") ? signingConfigs.release : signingConfigs.debug
 
             ndk {
