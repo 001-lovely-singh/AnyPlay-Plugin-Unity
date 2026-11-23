@@ -14,8 +14,8 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 /**
- * Back dabane par "Close game?" dialog (Any Play / baaki plugins jaisa). Sirf code se bana hai, XML nahi.
- * Yes dabane par [onYes] chalta hai, No par dialog band ho jata hai.
+ * "Close game?" dialog shown on Back (same look as Any Play and the other plugins). Built in code, no XML.
+ * Yes runs [onYes]; No just closes the dialog.
  */
 public final class CloseGameDialog {
     private CloseGameDialog() {}
@@ -81,7 +81,7 @@ public final class CloseGameDialog {
             int screenH = activity.getResources().getDisplayMetrics().heightPixels;
             int width = (int) (Math.max(screenW, screenH) * 0.55f);
             window.setLayout(Math.min(width, (int) (Math.min(screenW, screenH) * 1.4f)), ViewGroup.LayoutParams.WRAP_CONTENT);
-            // Immersive mode na tute: dialog ke saath system bars wapas na aayein
+            // Keep immersive mode: the dialog must not bring the system bars back
             window.setFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                 android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE);
         }
