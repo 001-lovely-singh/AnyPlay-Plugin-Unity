@@ -2,9 +2,11 @@ package com.winlator;
 
 import android.Manifest;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.preference.PreferenceManager;
 import android.util.Log;
 import android.view.Gravity;
 import android.widget.FrameLayout;
@@ -29,25 +31,25 @@ import org.json.JSONObject;
 import java.io.File;
 
 /**
- * Any Play se aane wala entry point. UI nahi dikhata, sirf loading screen.
+ * Entry point used by Any Play. Shows only a loading screen, then starts the game directly.
  *
- * Intent action : com.anyplay.unityplugin.action.RUN_GAME
- * Extras (ek hi chahiye):
- *   game_dir    (String) -> game ka folder (jisme Game.exe aur Game_Data hai). Exe plugin khud dhundta hai.
- *   game_zip    (String) -> game ka .zip. Plugin use apne storage mein ek baar kholta hai (cache), phir chalata hai.
- *   game_path   (String, optional) -> agar exe ka full path pehle se pata ho
- *   game_title  (String, optional)
- *   game_args   (String, optional) -> Unity launch flags
- *   screen_size (String, optional) -> default "1280x720"
- *   box64_preset(String, optional) -> default "STABILITY"
+ * Intent action: com.anyplay.unityplugin.action.RUN_GAME
+ * Extras (one of the first three is required):
+ *   game_dir     (String) folder that contains the .exe and <name>_Data. The plugin finds the exe itself.
+ *   game_zip     (String) a .zip of the game. The plugin unpacks it once into its own storage (cached), then plays it.
+ *   game_path    (String) full path of the .exe, if already known
+ *   game_title   (String, optional)
+ *   game_args    (String, optional) Unity launch flags
+ *   screen_size  (String, optional) default "1280x720"
+ *   box64_preset (String, optional) default "STABILITY"
  */
 public class LaunchActivity extends AppCompatActivity {
     public static final String ACTION_LAUNCH = "com.anyplay.unityplugin.action.RUN_GAME";
+    private static final String TAG = "AnyPlayUnity";
     private static final String CONTAINER_NAME = "AnyPlayUnity";
     private static final String DEFAULT_SCREEN_SIZE = "1280x720";
     private static final String DEFAULT_BOX64_PRESET = "STABILITY";
     private static final int PERMISSION_REQUEST_CODE = 100;
-    private static final String TAG = "AnyPlayUnity";
 
     private String gamePath;
     private String gameZip;
@@ -68,19 +70,12 @@ public class LaunchActivity extends AppCompatActivity {
         Intent intent = getIntent();
         gamePath = intent.getStringExtra("game_path");
         gameZip = intent.getStringExtra("game_zip");
+        gameDirExtra = intent.getStringExtra("game_dir");
         gameArgs = intent.getStringExtra("game_args");
         screenSize = intent.getStringExtra("screen_size");
         box64Preset = intent.getStringExtra("box64_preset");
 
-        String gameDir = intent.getStringExtra("game_dir");
         if (gameZip != null && gameZip.isEmpty()) gameZip = null;
-        if (gameZip == null && (gamePath == null || gamePath.isEmpty()) && gameDir != null) {
-            File exe = UnityZipExtractor.locateExe(new File(gameDir));
-            if (exe != null) gamePath = exe.getPath();
-        }
-
-        gameDirExtra = gameDir;
-
         if (screenSize == null || !screenSize.matches("\\d{3,4}x\\d{3,4}")) screenSize = DEFAULT_SCREEN_SIZE;
         if (box64Preset == null || box64Preset.isEmpty()) box64Preset = DEFAULT_BOX64_PRESET;
         if (gameArgs == null) gameArgs = "";
@@ -93,29 +88,13 @@ public class LaunchActivity extends AppCompatActivity {
         else prepare();
     }
 
-    /** Storage permission milne ke BAAD check karte hain, warna isFile() hamesha false aata hai. */
-    private boolean gameFilesOk() {
-        if (gameZip == null && (gamePath == null || gamePath.isEmpty()) && gameDirExtra != null) {
-            File exe = UnityZipExtractor.locateExe(new File(gameDirExtra));
-            if (exe != null) gamePath = exe.getPath();
-        }
-        boolean zipOk = gameZip != null && (new File(gameZip)).isFile();
-        boolean exeOk = gamePath != null && (new File(gamePath)).isFile();
-        if (!zipOk && !exeOk) {
-            Log.e(TAG, "Game file nahi mili. zip=" + gameZip + " exe=" + gamePath + " dir=" + gameDirExtra);
-            Toast.makeText(this, "Game file nahi mili", Toast.LENGTH_LONG).show();
-            return false;
-        }
-        return true;
-    }
-
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == PERMISSION_REQUEST_CODE) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) prepare();
             else {
-                Toast.makeText(this, "Storage permission zaruri hai", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "Storage permission is required to open the game.", Toast.LENGTH_LONG).show();
                 finish();
             }
         }
@@ -124,6 +103,22 @@ public class LaunchActivity extends AppCompatActivity {
     private boolean hasStoragePermission() {
         return ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED &&
                ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    /** Checked only after the storage permission is granted (isFile() is always false without it). */
+    private boolean gameFilesOk() {
+        if (gameZip == null && (gamePath == null || gamePath.isEmpty()) && gameDirExtra != null) {
+            File exe = UnityZipExtractor.locateExe(new File(gameDirExtra));
+            if (exe != null) gamePath = exe.getPath();
+        }
+        boolean zipOk = gameZip != null && (new File(gameZip)).isFile();
+        boolean exeOk = gamePath != null && (new File(gamePath)).isFile();
+        if (!zipOk && !exeOk) {
+            Log.e(TAG, "Game file not found. zip=" + gameZip + " exe=" + gamePath + " dir=" + gameDirExtra);
+            Toast.makeText(this, "Game file not found. It may have been moved or deleted.", Toast.LENGTH_LONG).show();
+            return false;
+        }
+        return true;
     }
 
     private void prepare() {
@@ -135,20 +130,24 @@ public class LaunchActivity extends AppCompatActivity {
             return;
         }
 
+        AnyPlayLog.begin();
+        AnyPlayLog.write("AnyPlay Unity Plugin launch");
+        AnyPlayLog.write("zip=" + gameZip + " exe=" + gamePath + " dir=" + gameDirExtra);
+
         if (RootFSInstaller.isInstallNeeded(this)) {
-            setStatus("Pehli baar setup ho raha hai...");
+            setStatus("Setting up for the first time...");
             RootFSInstaller.install(this, this::resolveGame);
         }
         else resolveGame();
     }
 
-    /** Zip ho to pehle cache mein kholo (background thread), phir container + launch. */
+    /** For a zip: unpack it into the cache first (background thread), then create the container and launch. */
     private void resolveGame() {
         if (gameZip == null) {
             prepareContainer();
             return;
         }
-        setStatus("Game taiyar ho raha hai (pehli baar zip khulta hai)...");
+        setStatus("Preparing the game (unpacking the zip, first launch only)...");
         final File zip = new File(gameZip);
         new Thread(new Runnable() {
             @Override
@@ -160,13 +159,13 @@ public class LaunchActivity extends AppCompatActivity {
                             runOnUiThread(new Runnable() {
                                 @Override
                                 public void run() {
-                                    setStatus("Game khul raha hai... " + percent + "%");
+                                    setStatus("Unpacking game... " + percent + "%");
                                 }
                             });
                         }
                     });
                     final File exe = UnityZipExtractor.locateExe(root);
-                    if (exe == null) throw new java.io.IOException("Zip ke andar Unity game (.exe) nahi mila");
+                    if (exe == null) throw new java.io.IOException("No Unity game (.exe) found inside the zip.");
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
@@ -176,11 +175,12 @@ public class LaunchActivity extends AppCompatActivity {
                     });
                 }
                 catch (final Exception e) {
-                    Log.e(TAG, "Zip extract failed: " + zip, e);
+                    Log.e(TAG, "Zip unpack failed: " + zip, e);
+                    AnyPlayLog.write("Zip unpack failed: " + e);
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            Toast.makeText(LaunchActivity.this, "Zip nahi khul paya: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                            Toast.makeText(LaunchActivity.this, "Couldn't unpack the zip: " + e.getMessage(), Toast.LENGTH_LONG).show();
                             finish();
                         }
                     });
@@ -190,7 +190,7 @@ public class LaunchActivity extends AppCompatActivity {
     }
 
     private void prepareContainer() {
-        setStatus("Game taiyar ho raha hai...");
+        setStatus("Getting the game ready...");
         final ContainerManager manager = new ContainerManager(this);
 
         Container container = null;
@@ -211,33 +211,42 @@ public class LaunchActivity extends AppCompatActivity {
             data.put("name", CONTAINER_NAME);
             data.put("screenSize", screenSize);
             data.put("box64Preset", box64Preset);
+            // The Winlator UI sets this for new containers; creating one from JSON without it falls back to Vortek.
             data.put("graphicsDriver", GraphicsDrivers.getDefaultDriver(this));
             manager.createContainerAsync(data, this::launchGame);
         }
         catch (Exception e) {
-            Toast.makeText(this, "Container nahi ban paya", Toast.LENGTH_LONG).show();
+            Log.e(TAG, "Container creation failed", e);
+            Toast.makeText(this, "Couldn't create the game container.", Toast.LENGTH_LONG).show();
             finish();
         }
     }
 
     private void launchGame(Container container) {
         if (container == null) {
-            Toast.makeText(this, "Container nahi ban paya", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "Couldn't create the game container.", Toast.LENGTH_LONG).show();
             finish();
             return;
         }
 
-        // Game ka folder G: drive banake mount karte hain, taaki koi bhi folder se game chal sake.
+        // Mount the game's folder as drive G: so a game can run from any folder.
         File gameDir = (new File(gamePath)).getParentFile();
         String drives = "G:" + gameDir.getPath() + Container.DEFAULT_DRIVES;
 
         container.setScreenSize(screenSize);
         container.setBox64Preset(box64Preset);
-        // Adreno phone pe Turnip (Winlator ka apna default). Pehle bane container mein Vortek reh gaya ho to use bhi theek karo.
+        // Turnip on Adreno phones (Winlator's own default). Also repairs a container created earlier with Vortek.
         String wantedDriver = GraphicsDrivers.getDefaultDriver(this);
         if (!wantedDriver.equals(container.getGraphicsDriver())) container.setGraphicsDriver(wantedDriver);
         container.setDrives(drives);
         container.saveData();
+
+        if (AnyPlayLog.ENABLED) {
+            SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(this);
+            preferences.edit().putBoolean("enable_wine_debug", true).putInt("box64_logs", 1).apply();
+            AnyPlayLog.write("container=" + container.id + " driver=" + container.getGraphicsDriver()
+                + " screen=" + screenSize + " box64=" + box64Preset + " drives=" + drives);
+        }
 
         Intent intent = new Intent(this, XServerDisplayActivity.class);
         intent.putExtra("container_id", container.id);
