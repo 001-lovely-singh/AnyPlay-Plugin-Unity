@@ -15,9 +15,10 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Enumeration;
+import android.util.Log;
 import java.util.List;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipFile;
+import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
+import org.apache.commons.compress.archivers.zip.ZipFile;
 
 /**
  * Wine cannot read a game from inside a zip (it needs real files), so to play a game from a zip
@@ -61,20 +62,18 @@ public final class UnityZipExtractor {
         if (!tmp.mkdirs()) throw new IOException("Couldn't create a folder in the plugin storage.");
 
         boolean ok = false;
-        if (hasEncryptedEntries(zip)) {
-            deleteRecursive(tmp);
-            throw new IOException("This zip is password-protected. Please unzip it first and add the unzipped folder.");
-        }
-
         ZipFile zf = openZip(zip);
         try {
             long total = 0;
-            Enumeration<? extends ZipEntry> en = zf.entries();
+            Enumeration<ZipArchiveEntry> en = zf.getEntries();
             while (en.hasMoreElements()) {
-                ZipEntry e = en.nextElement();
+                ZipArchiveEntry e = en.nextElement();
                 if (e.isDirectory()) continue;
-                if (e.getMethod() != ZipEntry.STORED && e.getMethod() != ZipEntry.DEFLATED) {
-                    throw new IOException("This zip uses a compression type that isn't supported. Please unzip it first and add the unzipped folder.");
+                if (e.getGeneralPurposeBit().usesEncryption()) {
+                    throw new IOException("This zip is password-protected. Please unzip it first and add the unzipped folder.");
+                }
+                if (!zf.canReadEntryData(e)) {
+                    throw new IOException("This zip uses a compression type that isn't supported (" + e.getName() + "). Please unzip it first and add the unzipped folder.");
                 }
                 if (e.getSize() > 0) total += e.getSize();
             }
@@ -87,9 +86,9 @@ public final class UnityZipExtractor {
             long done = 0;
             int lastPct = -1;
 
-            en = zf.entries();
+            en = zf.getEntries();
             while (en.hasMoreElements()) {
-                ZipEntry e = en.nextElement();
+                ZipArchiveEntry e = en.nextElement();
                 String name = e.getName().replace('\\', '/');
                 while (name.startsWith("/")) name = name.substring(1);
                 if (name.isEmpty()) continue;
@@ -109,7 +108,7 @@ public final class UnityZipExtractor {
                 OutputStream os = new FileOutputStream(out);
                 try {
                     int n;
-                    while ((n = readSafe(in, buf)) > 0) {
+                    while ((n = readSafe(in, buf, e)) > 0) {
                         os.write(buf, 0, n);
                         done += n;
                         if (progress != null && total > 0) {
@@ -194,63 +193,24 @@ public final class UnityZipExtractor {
         return f.isFile() && n.endsWith(".exe") && !n.startsWith("unitycrashhandler");
     }
 
-    private static int readSafe(InputStream in, byte[] buf) throws IOException {
+    private static int readSafe(InputStream in, byte[] buf, ZipArchiveEntry entry) throws IOException {
         try {
             return in.read(buf);
-        } catch (java.util.zip.ZipException e) {
-            throw new IOException("The zip looks damaged or uses an unsupported format. Please unzip it first and add the unzipped folder.", e);
+        } catch (IOException e) {
+            String info = "entry=" + entry.getName() + " method=" + entry.getMethod() + " size=" + entry.getSize()
+                + " compressed=" + entry.getCompressedSize();
+            Log.e("AnyPlayUnity", "Zip read failed: " + info, e);
+            AnyPlayLog.write("Zip read failed: " + info + " : " + e);
+            throw new IOException("The zip looks damaged or incomplete (" + entry.getName() + "). Please download it again, or unzip it first and add the unzipped folder.", e);
         }
-    }
-
-    /** Reads the zip's central directory and checks the "encrypted" flag of every entry. */
-    private static boolean hasEncryptedEntries(File zip) throws IOException {
-        java.io.RandomAccessFile raf = new java.io.RandomAccessFile(zip, "r");
-        try {
-            long len = raf.length();
-            int tail = (int) Math.min(len, 65557);
-            if (tail < 22) return false;
-            byte[] buf = new byte[tail];
-            raf.seek(len - tail);
-            raf.readFully(buf);
-            int eocd = -1;
-            for (int i = tail - 22; i >= 0; i--) {
-                if (buf[i] == 0x50 && buf[i + 1] == 0x4b && buf[i + 2] == 0x05 && buf[i + 3] == 0x06) {
-                    eocd = i;
-                    break;
-                }
-            }
-            if (eocd < 0) return false;
-            int count = u16(buf, eocd + 10);
-            long cdOffset = u32(buf, eocd + 16);
-            if (cdOffset == 0xFFFFFFFFL || count == 0xFFFF) return false; // zip64: not checked here
-            raf.seek(cdOffset);
-            byte[] h = new byte[46];
-            for (int i = 0; i < count; i++) {
-                raf.readFully(h);
-                if (u32(h, 0) != 0x02014b50L) return false;
-                if ((u16(h, 8) & 1) != 0) return true;
-                raf.seek(raf.getFilePointer() + u16(h, 28) + u16(h, 30) + u16(h, 32));
-            }
-            return false;
-        } finally {
-            raf.close();
-        }
-    }
-
-    private static int u16(byte[] b, int o) {
-        return (b[o] & 0xff) | ((b[o + 1] & 0xff) << 8);
-    }
-
-    private static long u32(byte[] b, int o) {
-        return (b[o] & 0xffL) | ((b[o + 1] & 0xffL) << 8) | ((b[o + 2] & 0xffL) << 16) | ((b[o + 3] & 0xffL) << 24);
     }
 
     private static ZipFile openZip(File zip) throws IOException {
         try {
-            return new ZipFile(zip, StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException e) {
-            // zips whose file names are not valid UTF-8
-            return new ZipFile(zip, StandardCharsets.ISO_8859_1);
+            return new ZipFile(zip, "UTF-8");
+        } catch (IOException e) {
+            // Fall back for zips with odd file-name encodings
+            return new ZipFile(zip, "ISO-8859-1");
         }
     }
 
