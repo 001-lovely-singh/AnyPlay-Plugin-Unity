@@ -20,11 +20,12 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 /**
- * Wine zip ke andar se game nahi padh sakta (use asli files chahiye), isliye zip se game
- * chalane ke liye plugin zip ko apne private storage mein EK BAAR kholta hai aur cache rakhta hai.
- * Agli baar same zip se seedha chalta hai. Sirf aakhri MAX_CACHED_GAMES games cache mein rehte hain.
+ * Wine cannot read a game from inside a zip (it needs real files), so to play a game from a zip
+ * the plugin unpacks the zip ONCE into its own private storage and keeps it as a cache.
+ * The next launch of the same zip starts straight from the cache. Only the last
+ * MAX_CACHED_GAMES games are kept.
  *
- * Saves: zyadatar Unity games Wine prefix (AppData) mein save karte hain, wo cache hatne par bhi bacha rehta hai.
+ * Saves: most Unity games save into the Wine prefix (AppData), which survives cache clean-up.
  */
 public final class UnityZipExtractor {
     public interface Progress {
@@ -36,7 +37,7 @@ public final class UnityZipExtractor {
 
     private UnityZipExtractor() {}
 
-    /** Zip ko cache folder mein kholta hai (pehle se khula ho to seedha wahi folder deta hai). Background thread se bulao. */
+    /** Unpacks the zip into the cache (returns the cached folder straight away if it is already unpacked). Call from a background thread. */
     public static File prepare(Context context, File zip, Progress progress) throws IOException {
         File base = new File(context.getFilesDir(), "unity_games");
         base.mkdirs();
@@ -51,15 +52,20 @@ public final class UnityZipExtractor {
             return target;
         }
 
-        // Adhoore purane extract hata do
+        // Remove half-finished extractions from earlier runs
         File[] old = base.listFiles();
         if (old != null) for (File f : old) if (f.getName().endsWith(".tmp")) deleteRecursive(f);
         deleteRecursive(target);
 
         File tmp = new File(base, key + ".tmp");
-        if (!tmp.mkdirs()) throw new IOException("Storage mein folder nahi ban paya");
+        if (!tmp.mkdirs()) throw new IOException("Couldn't create a folder in the plugin storage.");
 
         boolean ok = false;
+        if (hasEncryptedEntries(zip)) {
+            deleteRecursive(tmp);
+            throw new IOException("This zip is password-protected. Please unzip it first and add the unzipped folder.");
+        }
+
         ZipFile zf = openZip(zip);
         try {
             long total = 0;
@@ -68,12 +74,12 @@ public final class UnityZipExtractor {
                 ZipEntry e = en.nextElement();
                 if (e.isDirectory()) continue;
                 if (e.getMethod() != ZipEntry.STORED && e.getMethod() != ZipEntry.DEFLATED) {
-                    throw new IOException("Is zip ka compression type support nahi hai. Zip ko unzip karke folder add karo.");
+                    throw new IOException("This zip uses a compression type that isn't supported. Please unzip it first and add the unzipped folder.");
                 }
                 if (e.getSize() > 0) total += e.getSize();
             }
             if (base.getUsableSpace() < total + 300L * 1024 * 1024) {
-                throw new IOException("Phone mein storage kam hai (game ke liye lagbhag " + (total / (1024 * 1024)) + " MB chahiye).");
+                throw new IOException("Not enough free storage (the game needs about " + (total / (1024 * 1024)) + " MB).");
             }
 
             String tmpCanon = tmp.getCanonicalPath() + File.separator;
@@ -90,7 +96,7 @@ public final class UnityZipExtractor {
 
                 File out = new File(tmp, name);
                 if (!(out.getCanonicalPath() + File.separator).startsWith(tmpCanon)) {
-                    throw new IOException("Zip mein galat path mila");
+                    throw new IOException("The zip contains an unsafe file path.");
                 }
                 if (e.isDirectory()) {
                     out.mkdirs();
@@ -103,7 +109,7 @@ public final class UnityZipExtractor {
                 OutputStream os = new FileOutputStream(out);
                 try {
                     int n;
-                    while ((n = in.read(buf)) > 0) {
+                    while ((n = readSafe(in, buf)) > 0) {
                         os.write(buf, 0, n);
                         done += n;
                         if (progress != null && total > 0) {
@@ -122,7 +128,7 @@ public final class UnityZipExtractor {
             }
 
             writeText(new File(tmp, MARKER), stamp);
-            if (!tmp.renameTo(target)) throw new IOException("Game folder rename nahi ho paya");
+            if (!tmp.renameTo(target)) throw new IOException("Couldn't finish unpacking the game.");
             new File(target, MARKER).setLastModified(System.currentTimeMillis());
             ok = true;
         } finally {
@@ -135,8 +141,8 @@ public final class UnityZipExtractor {
     }
 
     /**
-     * Folder mein Unity game ka exe dhundta hai: UnityCrashHandler nahi, aur jiske naam ka "<naam>_Data"
-     * folder ho. Game ek extra folder ke andar ho to (3 level tak) wo bhi mil jata hai.
+     * Finds the Unity game's exe inside a folder: not UnityCrashHandler, and with a matching
+     * "<name>_Data" folder next to it. Also works when the game sits inside extra folders (up to 3 levels).
      */
     public static File locateExe(File root) {
         File strict = searchStrict(root, 0);
@@ -188,11 +194,62 @@ public final class UnityZipExtractor {
         return f.isFile() && n.endsWith(".exe") && !n.startsWith("unitycrashhandler");
     }
 
+    private static int readSafe(InputStream in, byte[] buf) throws IOException {
+        try {
+            return in.read(buf);
+        } catch (java.util.zip.ZipException e) {
+            throw new IOException("The zip looks damaged or uses an unsupported format. Please unzip it first and add the unzipped folder.", e);
+        }
+    }
+
+    /** Reads the zip's central directory and checks the "encrypted" flag of every entry. */
+    private static boolean hasEncryptedEntries(File zip) throws IOException {
+        java.io.RandomAccessFile raf = new java.io.RandomAccessFile(zip, "r");
+        try {
+            long len = raf.length();
+            int tail = (int) Math.min(len, 65557);
+            if (tail < 22) return false;
+            byte[] buf = new byte[tail];
+            raf.seek(len - tail);
+            raf.readFully(buf);
+            int eocd = -1;
+            for (int i = tail - 22; i >= 0; i--) {
+                if (buf[i] == 0x50 && buf[i + 1] == 0x4b && buf[i + 2] == 0x05 && buf[i + 3] == 0x06) {
+                    eocd = i;
+                    break;
+                }
+            }
+            if (eocd < 0) return false;
+            int count = u16(buf, eocd + 10);
+            long cdOffset = u32(buf, eocd + 16);
+            if (cdOffset == 0xFFFFFFFFL || count == 0xFFFF) return false; // zip64: not checked here
+            raf.seek(cdOffset);
+            byte[] h = new byte[46];
+            for (int i = 0; i < count; i++) {
+                raf.readFully(h);
+                if (u32(h, 0) != 0x02014b50L) return false;
+                if ((u16(h, 8) & 1) != 0) return true;
+                raf.seek(raf.getFilePointer() + u16(h, 28) + u16(h, 30) + u16(h, 32));
+            }
+            return false;
+        } finally {
+            raf.close();
+        }
+    }
+
+    private static int u16(byte[] b, int o) {
+        return (b[o] & 0xff) | ((b[o + 1] & 0xff) << 8);
+    }
+
+    private static long u32(byte[] b, int o) {
+        return (b[o] & 0xffL) | ((b[o + 1] & 0xffL) << 8) | ((b[o + 2] & 0xffL) << 16) | ((b[o + 3] & 0xffL) << 24);
+    }
+
     private static ZipFile openZip(File zip) throws IOException {
         try {
             return new ZipFile(zip, StandardCharsets.UTF_8);
         } catch (IllegalArgumentException e) {
-            // UTF-8 mein na padhe jaane wale file naam wale zips
+            // zips whose file names are not valid UTF-8
             return new ZipFile(zip, StandardCharsets.ISO_8859_1);
         }
     }
