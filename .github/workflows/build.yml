@@ -1,9 +1,8 @@
 name: Build AnyPlay Unity Plugin
 
-# Ab har edit/push pe build NAHI chalega.
-# Build sirf do tarah se chalta hai:
-#   1) Tag push:  git tag v1.0.0 && git push origin v1.0.0
-#   2) Actions tab > "Build AnyPlay Unity Plugin" > Run workflow (tag naam likho)
+# A build does NOT run on every push. It runs only:
+#   1) on a tag push:  git tag v1.0.0 && git push origin v1.0.0
+#   2) manually: Actions tab > "Build AnyPlay Unity Plugin" > Run workflow (enter a tag name)
 on:
   push:
     tags:
@@ -49,8 +48,8 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
 
-      # Signing key GitHub Secrets mein rehti hai (repo mein kabhi nahi).
-      # Main app aur RGSS plugin wali SAME keystore ke secrets is repo mein bhi daalo.
+      # The signing key lives in GitHub Secrets (never in the repo).
+      # Put the SAME keystore secrets as the main app / RGSS plugin here too.
       - name: Prepare signing key
         env:
           KS_B64: ${{ secrets.ANYPLAY_KEYSTORE_BASE64 }}
