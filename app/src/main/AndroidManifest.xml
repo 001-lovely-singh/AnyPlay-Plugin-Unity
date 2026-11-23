@@ -24,18 +24,17 @@
         android:allowAudioPlaybackCapture="true"
         android:label="AnyPlay Unity Plugin">
 
-        <!-- Any Play ko batata hai ki ye plugin zip se game chala sakta hai (UnityLauncher.supportsZip) -->
+        <!-- Tells Any Play that this plugin can play games from a zip (UnityLauncher.supportsZip) -->
         <meta-data android:name="anyplay_zip_launch" android:value="true" />
 
-        <!-- Winlator ki purani UI: LAUNCHER hata diya, ab app drawer mein icon nahi aayega
-             aur ye bahar se khul nahi sakti. -->
+        <!-- Old Winlator UI: no LAUNCHER entry, so there is no app-drawer icon, and it cannot be opened from outside. -->
         <activity android:name="com.winlator.MainActivity"
             android:theme="@style/AppThemeDark"
             android:exported="false"
             android:screenOrientation="sensor"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|density|navigation" />
 
-        <!-- Any Play yahin Intent bhejta hai: seedha game launch. Launcher icon nahi hai. -->
+        <!-- Any Play sends its Intent here: starts the game directly. No launcher icon. -->
         <activity android:name="com.winlator.LaunchActivity"
             android:theme="@style/AppThemeFullscreenDark"
             android:exported="true"
