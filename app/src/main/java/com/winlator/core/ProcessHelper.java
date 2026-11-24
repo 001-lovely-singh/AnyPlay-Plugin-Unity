@@ -89,7 +89,11 @@ public abstract class ProcessHelper {
 
             if (terminationCallback != null) createWaitForThread(process, terminationCallback);
         }
-        catch (Exception e) {}
+        catch (Exception e) {
+            // Was silently ignored before. A failed start (for example a missing ELF interpreter) left the app on the loading screen forever.
+            android.util.Log.e("AnyPlayUnity", "exec failed: " + command, e);
+            com.winlator.AnyPlayLog.write("exec failed: " + command + " : " + e);
+        }
         return pid;
     }
 
