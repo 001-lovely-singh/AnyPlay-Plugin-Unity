@@ -64,6 +64,14 @@ jobs:
             echo "No signing secrets found: the APK will be signed with a temporary debug key."
           fi
 
+      # The prebuilt Winlator files (rootfs, box64, drivers) have the path /data/data/com.winlator/...
+      # baked in. This step rewrites it to this app's package name (same length: com.anyunity).
+      - name: Install zstd
+        run: sudo apt-get update -y && sudo apt-get install -y zstd
+
+      - name: Patch assets for the new package name
+        run: python3 tools/patch_assets.py app/src/main/assets com.winlator com.anyunity
+
       - name: Build release APK
         run: ./gradlew assembleRelease --no-daemon --stacktrace
 
