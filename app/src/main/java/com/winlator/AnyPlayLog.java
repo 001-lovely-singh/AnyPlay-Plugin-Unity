@@ -6,6 +6,8 @@ import com.winlator.core.Callback;
 import com.winlator.core.ProcessHelper;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.util.Properties;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStreamWriter;
@@ -31,6 +33,27 @@ public final class AnyPlayLog {
     };
 
     private AnyPlayLog() {}
+
+    /**
+     * Optional test settings, read from /storage/emulated/0/Download/AnyPlayUnity/launch.cfg (one "key=value" per line,
+     * use / instead of \\ in paths). Supported keys: game_args, dxvk_version, box64_preset, screen_size.
+     * Only used while ENABLED is true.
+     */
+    public static Properties readConfig() {
+        Properties props = new Properties();
+        if (!ENABLED) return props;
+        File file = new File(Environment.getExternalStorageDirectory(), "Download/AnyPlayUnity/launch.cfg");
+        if (!file.isFile()) return props;
+        try {
+            FileInputStream in = new FileInputStream(file);
+            try {
+                props.load(in);
+            } finally {
+                in.close();
+            }
+        } catch (IOException ignored) {}
+        return props;
+    }
 
     /** Starts a fresh log file. Call before the game is launched. */
     public static synchronized void begin() {
