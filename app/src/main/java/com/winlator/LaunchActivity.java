@@ -29,6 +29,7 @@ import com.winlator.xenvironment.RootFSInstaller;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.util.Properties;
 
 /**
  * Entry point used by Any Play. Shows only a loading screen, then starts the game directly.
@@ -121,6 +122,21 @@ public class LaunchActivity extends AppCompatActivity {
         return true;
     }
 
+    private String dxvkVersion = "";
+
+    /** Debug only: values from Download/AnyPlayUnity/launch.cfg win over the defaults. Also asks Unity for its own log file. */
+    private void applyTestConfig() {
+        if (!AnyPlayLog.ENABLED) return;
+        Properties cfg = AnyPlayLog.readConfig();
+        if (cfg.getProperty("game_args") != null) gameArgs = cfg.getProperty("game_args").trim();
+        if (cfg.getProperty("screen_size") != null && cfg.getProperty("screen_size").trim().matches("\\d{3,4}x\\d{3,4}")) screenSize = cfg.getProperty("screen_size").trim();
+        if (cfg.getProperty("box64_preset") != null && !cfg.getProperty("box64_preset").trim().isEmpty()) box64Preset = cfg.getProperty("box64_preset").trim();
+        if (cfg.getProperty("dxvk_version") != null) dxvkVersion = cfg.getProperty("dxvk_version").trim();
+        // Unity writes its own log into the game folder (G: is the game folder)
+        if (!gameArgs.contains("-logFile")) gameArgs = (gameArgs + " -logFile G:/AnyPlay-Player.log").trim();
+        AnyPlayLog.write("test config: args=" + gameArgs + " screen=" + screenSize + " box64=" + box64Preset + " dxvk=" + (dxvkVersion.isEmpty() ? "default" : dxvkVersion));
+    }
+
     private void prepare() {
         if (started) return;
         started = true;
@@ -132,6 +148,7 @@ public class LaunchActivity extends AppCompatActivity {
 
         AnyPlayLog.begin();
         AnyPlayLog.write("AnyPlay Unity Plugin launch");
+        applyTestConfig();
         AnyPlayLog.write("zip=" + gameZip + " exe=" + gamePath + " dir=" + gameDirExtra);
 
         if (RootFSInstaller.isInstallNeeded(this)) {
@@ -239,6 +256,8 @@ public class LaunchActivity extends AppCompatActivity {
         String wantedDriver = GraphicsDrivers.getDefaultDriver(this);
         if (!wantedDriver.equals(container.getGraphicsDriver())) container.setGraphicsDriver(wantedDriver);
         container.setDrives(drives);
+        // Empty = the app's default DXVK version; "1.10.3" can be tried through launch.cfg on weak GPUs.
+        container.setDXWrapperConfig(dxvkVersion.isEmpty() ? "" : "version=" + dxvkVersion);
         container.saveData();
 
         if (AnyPlayLog.ENABLED) {
