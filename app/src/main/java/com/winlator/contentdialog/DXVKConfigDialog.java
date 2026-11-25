@@ -73,7 +73,9 @@ public class DXVKConfigDialog extends ContentDialog {
     public static void setEnvVars(Context context, KeyValueSet config, EnvVars envVars) {
         if (config.get("version").contains("async")) envVars.put("DXVK_ASYNC", "1");
         envVars.put("DXVK_STATE_CACHE_PATH", RootFS.getDosUserCachePath());
-        envVars.put("DXVK_LOG_LEVEL", "none");
+        envVars.put("DXVK_LOG_LEVEL", com.winlator.AnyPlayLog.ENABLED ? "info" : "none");
+        // Debug: DXVK writes <game>_d3d11.log / _dxgi.log into the game folder (G: drive)
+        if (com.winlator.AnyPlayLog.ENABLED) envVars.put("DXVK_LOG_PATH", "G:/");
 
         File rootDir = RootFS.find(context).getRootDir();
         File dxvkConfigFile = new File(rootDir, RootFS.USER_CONFIG_PATH+"/dxvk.conf");
