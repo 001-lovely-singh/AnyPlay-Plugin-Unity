@@ -41,6 +41,34 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
     private Runnable fourFingersTapCallback;
     private final float[] xform = XForm.getInstance();
 
+    // ---- Direct touch mode (AnyPlay): the finger IS the pointer. No cursor and no touchpad-style movement. ----
+    // 1 finger: the pointer jumps to the finger; a tap is a left click; moving the finger drags.
+    // 2 fingers: scroll; a quick two-finger tap is a right click.
+    private static final short DIRECT_PRESS_DELAY_MS = 70;
+    private static final short DIRECT_RELEASE_DELAY_MS = 40;
+    private static final short DIRECT_TWO_FINGER_TAP_MS = 250;
+    private static final byte DIRECT_DRAG_DISTANCE = 12;
+    private static final byte DIRECT_SCROLL_STEP = 60;
+    private boolean directTouch = false;
+    private int directPrimaryId = -1;
+    private int directStartX;
+    private int directStartY;
+    private boolean directPressed = false;
+    private boolean directMultiTouch = false;
+    private boolean directScrolled = false;
+    private boolean directReleasePending = false;
+    private long directMultiStartTime;
+    private float directLastAvgY;
+    private float directScrollAccum;
+    private float directScrollTravel;
+    private final Runnable directPressRunnable = () -> {
+        if (directPrimaryId >= 0 && !directMultiTouch) pressDirectLeft();
+    };
+    private final Runnable directReleaseRunnable = () -> {
+        directReleasePending = false;
+        releaseDirectLeftNow();
+    };
+
     public TouchpadView(Context context, XServer xServer, boolean capturePointerOnExternalMouse) {
         super(context);
         this.xServer = xServer;
@@ -138,6 +166,8 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        if (directTouch && !event.isFromSource(InputDevice.SOURCE_MOUSE)) return onDirectTouchEvent(event);
+
         int actionIndex = event.getActionIndex();
         int pointerId = event.getPointerId(actionIndex);
         int actionMasked = event.getActionMasked();
@@ -345,6 +375,166 @@ public class TouchpadView extends View implements View.OnCapturedPointerListener
 
     public void setFourFingersTapCallback(Runnable fourFingersTapCallback) {
         this.fourFingersTapCallback = fourFingersTapCallback;
+    }
+
+    public boolean isDirectTouch() {
+        return directTouch;
+    }
+
+    public void setDirectTouch(boolean directTouch) {
+        this.directTouch = directTouch;
+    }
+
+    private boolean onDirectTouchEvent(MotionEvent event) {
+        if (!isEnabled()) return true;
+
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN: {
+                removeCallbacks(directPressRunnable);
+                flushDirectRelease();
+                directPressed = false;
+                directMultiTouch = false;
+                directScrolled = false;
+                directPrimaryId = event.getPointerId(0);
+
+                float[] point = XForm.transformPoint(xform, event.getX(0), event.getY(0));
+                directStartX = (int)point[0];
+                directStartY = (int)point[1];
+                xServer.injectPointerMove(directStartX, directStartY);
+                // Press a moment later: a quick second finger then turns into a scroll/right click instead of a click.
+                postDelayed(directPressRunnable, DIRECT_PRESS_DELAY_MS);
+                break;
+            }
+            case MotionEvent.ACTION_POINTER_DOWN: {
+                if (event.getPointerCount() == 2) {
+                    removeCallbacks(directPressRunnable);
+                    if (directPressed) releaseDirectLeftNow();
+                    directMultiTouch = true;
+                    directScrolled = false;
+                    directScrollAccum = 0;
+                    directScrollTravel = 0;
+                    directMultiStartTime = System.currentTimeMillis();
+                    directLastAvgY = directAverageY(event);
+                }
+                break;
+            }
+            case MotionEvent.ACTION_MOVE: {
+                if (!directMultiTouch) {
+                    int index = event.findPointerIndex(directPrimaryId);
+                    if (index < 0) break;
+
+                    float[] point = XForm.transformPoint(xform, event.getX(index), event.getY(index));
+                    int x = (int)point[0];
+                    int y = (int)point[1];
+                    xServer.injectPointerMove(x, y);
+
+                    if (!directPressed && Math.hypot(x - directStartX, y - directStartY) > DIRECT_DRAG_DISTANCE) {
+                        removeCallbacks(directPressRunnable);
+                        pressDirectLeft();
+                    }
+                }
+                else if (event.getPointerCount() == 2) {
+                    float avgY = directAverageY(event);
+                    float dy = avgY - directLastAvgY;
+                    directLastAvgY = avgY;
+                    directScrollAccum += dy;
+                    directScrollTravel += Math.abs(dy);
+                    if (directScrollTravel > 20) directScrolled = true;
+
+                    if (directScrollAccum < -DIRECT_SCROLL_STEP) {
+                        xServer.injectPointerButtonPress(Pointer.Button.BUTTON_SCROLL_DOWN);
+                        xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_SCROLL_DOWN);
+                        directScrollAccum = 0;
+                    }
+                    else if (directScrollAccum > DIRECT_SCROLL_STEP) {
+                        xServer.injectPointerButtonPress(Pointer.Button.BUTTON_SCROLL_UP);
+                        xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_SCROLL_UP);
+                        directScrollAccum = 0;
+                    }
+                }
+                break;
+            }
+            case MotionEvent.ACTION_POINTER_UP: {
+                if (directMultiTouch && event.getPointerCount() == 2 && !directScrolled &&
+                    System.currentTimeMillis() - directMultiStartTime < DIRECT_TWO_FINGER_TAP_MS) {
+                    clickDirectRight();
+                    directScrolled = true;
+                }
+                break;
+            }
+            case MotionEvent.ACTION_UP: {
+                removeCallbacks(directPressRunnable);
+                if (!directMultiTouch) {
+                    float[] point = XForm.transformPoint(xform, event.getX(), event.getY());
+                    xServer.injectPointerMove((int)point[0], (int)point[1]);
+                    if (!directPressed) pressDirectLeft();
+                    releaseDirectLeftSoon();
+                }
+                else if (directPressed) releaseDirectLeftNow();
+                resetDirectTouch();
+                break;
+            }
+            case MotionEvent.ACTION_CANCEL: {
+                removeCallbacks(directPressRunnable);
+                if (directPressed) releaseDirectLeftNow();
+                resetDirectTouch();
+                break;
+            }
+        }
+        return true;
+    }
+
+    private void resetDirectTouch() {
+        directPrimaryId = -1;
+        directMultiTouch = false;
+        directScrolled = false;
+    }
+
+    /** Average Y of the first two fingers, in X server coordinates. */
+    private float directAverageY(MotionEvent event) {
+        float sum = 0;
+        int count = Math.min(2, event.getPointerCount());
+        for (int i = 0; i < count; i++) {
+            sum += XForm.transformPoint(xform, event.getX(i), event.getY(i))[1];
+        }
+        return sum / count;
+    }
+
+    private void pressDirectLeft() {
+        if (!pointerButtonLeftEnabled) return;
+        flushDirectRelease();
+        if (!xServer.pointer.isButtonPressed(Pointer.Button.BUTTON_LEFT)) {
+            xServer.injectPointerButtonPress(Pointer.Button.BUTTON_LEFT);
+        }
+        directPressed = true;
+    }
+
+    private void releaseDirectLeftNow() {
+        if (xServer.pointer.isButtonPressed(Pointer.Button.BUTTON_LEFT)) {
+            xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_LEFT);
+        }
+        directPressed = false;
+    }
+
+    /** Lets go of the button a few milliseconds later, so the game sees a real press even for a very quick tap. */
+    private void releaseDirectLeftSoon() {
+        if (directReleasePending) return;
+        directReleasePending = true;
+        postDelayed(directReleaseRunnable, DIRECT_RELEASE_DELAY_MS);
+    }
+
+    private void flushDirectRelease() {
+        if (directReleasePending) {
+            removeCallbacks(directReleaseRunnable);
+            directReleasePending = false;
+            releaseDirectLeftNow();
+        }
+    }
+
+    private void clickDirectRight() {
+        if (!pointerButtonRightEnabled || xServer.pointer.isButtonPressed(Pointer.Button.BUTTON_RIGHT)) return;
+        xServer.injectPointerButtonPress(Pointer.Button.BUTTON_RIGHT);
+        postDelayed(() -> xServer.injectPointerButtonRelease(Pointer.Button.BUTTON_RIGHT), DIRECT_RELEASE_DELAY_MS);
     }
 
     public boolean isMoveCursorToTouchpoint() {
