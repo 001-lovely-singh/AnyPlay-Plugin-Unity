@@ -591,6 +591,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         touchpadView = new TouchpadView(this, xServer, capturePointerOnExternalMouse);
         touchpadView.setSensitivity(globalCursorSpeed);
         touchpadView.setMoveCursorToTouchpoint(preferences.getBoolean("move_cursor_to_touchpoint", false));
+        touchpadView.setDirectTouch(true); // AnyPlay: tap where you want to click, no mouse cursor
         touchpadView.setFourFingersTapCallback(() -> {
             if (!drawerLayout.isDrawerOpen(GravityCompat.START)) drawerLayout.openDrawer(GravityCompat.START);
         });
@@ -711,7 +712,8 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
 
     private void updateCursorVisibility() {
         ControlsProfile profile = inputControlsView.getProfile();
-        xServerView.getRenderer().setCursorVisible(profile == null || profile.isCursorVisible());
+        boolean showCursor = !touchpadView.isDirectTouch() && (profile == null || profile.isCursorVisible());
+        xServerView.getRenderer().setCursorVisible(showCursor);
     }
 
     private void extractGraphicsDriverFiles() {
