@@ -17,6 +17,8 @@ import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.CheckBox;
 import android.widget.FrameLayout;
+import com.anyplay.engine.JsBridge;
+import com.anyplay.overlay.OverlayController;
 import android.widget.Spinner;
 
 import androidx.annotation.NonNull;
@@ -326,6 +328,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
 
     @Override
     public void onPause() {
+        if (overlayController != null) overlayController.releaseAllKeys();
         ForegroundService.onPauseSession(this);
         super.onPause();
         if (environment != null && !isInPictureInPictureMode()) {
@@ -349,9 +352,17 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     }
 
     private android.app.Dialog closeGameDialog;
+    private OverlayController overlayController;
+
+    /** Key from the on-screen gamepad / keyboard -> X server. */
+    private void sendVirtualKey(boolean down, int keyCode, int metaState) {
+        KeyEvent event = new KeyEvent(0, 0, down ? KeyEvent.ACTION_DOWN : KeyEvent.ACTION_UP, keyCode, 0, metaState);
+        xServer.keyboard.onKeyEvent(event);
+    }
 
     @Override
     public void onBackPressed() {
+        if (overlayController != null && overlayController.handleBack()) return; // leaves the layout editor
         if (closeGameDialog != null && closeGameDialog.isShowing()) {
             closeGameDialog.dismiss();
             return;
@@ -430,6 +441,7 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
     }
 
     private void exit() {
+        if (overlayController != null) overlayController.shutdown();
         winHandler.stop();
         if (environment != null) environment.stopEnvironmentComponents();
         ForegroundService.stopSession(this);
@@ -622,6 +634,14 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
                 if (profile != null) showInputControls(profile);
             }
         }
+
+        // AnyPlay overlay: the same gamepad / keyboard / edit toolbar as in the main app.
+        // It is added last, so it sits on top of the touch layer; touches on empty space fall through to the game.
+        String gameKey = getIntent().getStringExtra("game_key");
+        if (gameKey == null || gameKey.isEmpty()) gameKey = getIntent().getStringExtra("exec_path");
+        if (gameKey == null) gameKey = "default";
+        JsBridge keyBridge = new JsBridge((down, keyCode, metaState) -> sendVirtualKey(down, keyCode, metaState));
+        overlayController = new OverlayController(this, rootView, keyBridge, gameKey, () -> kotlin.Unit.INSTANCE, false);
 
         if (MainActivity.DEBUG_MODE) rootView.addView(AppUtils.createDebugMsgTextView(this));
         AppUtils.observeSoftKeyboardVisibility(drawerLayout, renderer::setScreenOffsetYRelativeToCursor);
