@@ -54,6 +54,12 @@ android {
         targetCompatibility JavaVersion.VERSION_1_8
     }
 
+    // Assets are already zstd-compressed (.tzst); deflating them again wastes
+    // memory and time, and is what ran the build out of heap.
+    androidResources {
+        noCompress 'tzst', 'zst', 'xz', 'txz'
+    }
+
     kotlinOptions {
         jvmTarget = '1.8'
     }
