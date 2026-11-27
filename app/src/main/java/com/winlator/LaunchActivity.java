@@ -271,6 +271,9 @@ public class LaunchActivity extends AppCompatActivity {
         intent.putExtra("container_id", container.id);
         intent.putExtra("exec_path", gamePath);
         intent.putExtra("exec_args", gameArgs);
+        // The on-screen gamepad layout is saved per game: the zip, or the game's folder.
+        String gameKey = gameZip != null ? gameZip : (gameDirExtra != null ? gameDirExtra : gameDir.getPath());
+        intent.putExtra("game_key", gameKey);
         startActivity(intent);
         finish();
     }
