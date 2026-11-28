@@ -24,6 +24,7 @@ public final class AnyPlayLog {
     private static final long MAX_BYTES = 20L * 1024 * 1024;
     private static PrintWriter writer;
     private static long written = 0;
+    private static long startTime = 0;
 
     private static final Callback<String> PROCESS_OUTPUT = new Callback<String>() {
         @Override
@@ -64,6 +65,7 @@ public final class AnyPlayLog {
             if (!dir.isDirectory() && !dir.mkdirs()) return;
             writer = new PrintWriter(new OutputStreamWriter(new FileOutputStream(new File(dir, "log.txt"), false), "UTF-8"), true);
             written = 0;
+            startTime = System.currentTimeMillis();
         } catch (IOException e) {
             writer = null;
         }
@@ -79,7 +81,8 @@ public final class AnyPlayLog {
         if (writer == null || line == null) return;
         written += line.length() + 1;
         if (written > MAX_BYTES) return;
-        writer.println(line);
+        // Seconds since the launch, so slow loading phases show up in the log
+        writer.println(String.format(java.util.Locale.US, "[%7.1fs] ", (System.currentTimeMillis() - startTime) / 1000.0) + line);
     }
 
     private static void close() {
