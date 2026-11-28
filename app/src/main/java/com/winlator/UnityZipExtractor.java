@@ -217,6 +217,17 @@ public final class UnityZipExtractor {
         return null;
     }
 
+    /** true if [dir] (the folder next to the game exe) is a Wolf RPG Editor game: it has a Data folder with BasicData / .wolf files. */
+    public static boolean isWolfGameDir(File dir) {
+        if (dir == null) return false;
+        File[] files = dir.listFiles();
+        if (files == null) return false;
+        for (File f : files) {
+            if (f.isDirectory() && f.getName().equalsIgnoreCase("data")) return isWolfData(f);
+        }
+        return false;
+    }
+
     private static boolean isWolfData(File data) {
         File[] items = data.listFiles();
         if (items == null) return false;
