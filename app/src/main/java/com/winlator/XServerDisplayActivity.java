@@ -9,6 +9,8 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.KeyEvent;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -93,6 +95,8 @@ import com.winlator.xserver.Property;
 import com.winlator.xserver.ScreenInfo;
 import com.winlator.xserver.Window;
 import com.winlator.xserver.WindowManager;
+import com.winlator.xserver.XKeycode;
+import com.winlator.xserver.XLock;
 import com.winlator.xserver.XServer;
 
 import org.json.JSONArray;
@@ -260,6 +264,12 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
 
                 if (win32AppWorkarounds != null) win32AppWorkarounds.applyWindowWorkarounds(window);
                 changeFrameRatingVisibility(window, true);
+
+                // Wolf RPG games: switch to full screen (F4) once, so the Windows title bar goes away.
+                if (!autoF4Started && getIntent().getBooleanExtra("auto_fullscreen_f4", false) && window.isApplicationWindow()) {
+                    autoF4Started = true;
+                    startAutoFullscreenF4();
+                }
             }
 
             @Override
@@ -497,6 +507,62 @@ public class XServerDisplayActivity extends AppCompatActivity implements Navigat
         }
 
         if (containerDataChanged) container.saveData();
+    }
+
+    // ---- Wolf RPG: automatic F4 (full screen) ---------------------------------
+
+    private boolean autoF4Started = false;
+
+    /**
+     * Waits for the game window, then presses F4 once (the game's own "Change Display" key). If the window
+     * did not change after 4 seconds (the game was not ready yet and ignored the key) it tries again, at most
+     * 3 times. It never presses F4 when the window already fills the screen, so a game that remembers full
+     * screen is not switched back to a window.
+     */
+    private void startAutoFullscreenF4() {
+        final Handler handler = new Handler(Looper.getMainLooper());
+        final int[] state = {0, 0, 0, 0, 0, 0}; // ticks, presses, x, y, width, height (before the last press)
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (isFinishing() || isDestroyed()) return;
+                Window game = findGameWindow();
+                if (game == null) {
+                    if (++state[0] < 30) handler.postDelayed(this, 2000); // keep waiting for the window
+                    return;
+                }
+                if (game.getWidth() >= xServer.screenInfo.width && game.getHeight() >= xServer.screenInfo.height) return; // already full screen
+                if (state[1] > 0 && (game.getX() != state[2] || game.getY() != state[3]
+                        || game.getWidth() != state[4] || game.getHeight() != state[5])) return; // the last F4 worked
+                if (state[1] >= 3) return;
+
+                state[1]++;
+                state[2] = game.getX();
+                state[3] = game.getY();
+                state[4] = game.getWidth();
+                state[5] = game.getHeight();
+                xServer.injectKeyPress(XKeycode.KEY_F4);
+                handler.postDelayed(() -> xServer.injectKeyRelease(XKeycode.KEY_F4), 120);
+                handler.postDelayed(this, 4000);
+            }
+        }, 8000);
+    }
+
+    /** The biggest visible application window that is not the Wine desktop. */
+    private Window findGameWindow() {
+        Window best = null;
+        long bestArea = 0;
+        try (XLock lock = xServer.lock(XServer.Lockable.WINDOW_MANAGER)) {
+            for (Window child : xServer.windowManager.rootWindow.getChildren()) {
+                if (!child.attributes.isMapped() || !child.isApplicationWindow() || child.isDesktopWindow()) continue;
+                long area = (long)child.getWidth() * child.getHeight();
+                if (area > bestArea) {
+                    best = child;
+                    bestArea = area;
+                }
+            }
+        }
+        return best;
     }
 
     private void setupXEnvironment() {
