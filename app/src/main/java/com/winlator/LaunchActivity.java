@@ -124,6 +124,9 @@ public class LaunchActivity extends AppCompatActivity {
 
     private String dxvkVersion = "";
 
+    /** Wolf RPG games open in a window with a title bar; the plugin presses F4 once to switch them to full screen. */
+    private boolean autoFullscreenF4 = true;
+
     /** Debug only: values from Download/AnyPlayUnity/launch.cfg win over the defaults. Also asks Unity for its own log file. */
     private void applyTestConfig() {
         if (!AnyPlayLog.ENABLED) return;
@@ -132,6 +135,8 @@ public class LaunchActivity extends AppCompatActivity {
         if (cfg.getProperty("screen_size") != null && cfg.getProperty("screen_size").trim().matches("\\d{3,4}x\\d{3,4}")) screenSize = cfg.getProperty("screen_size").trim();
         if (cfg.getProperty("box64_preset") != null && !cfg.getProperty("box64_preset").trim().isEmpty()) box64Preset = cfg.getProperty("box64_preset").trim();
         if (cfg.getProperty("dxvk_version") != null) dxvkVersion = cfg.getProperty("dxvk_version").trim();
+        // launch.cfg: auto_f4=0 turns the automatic F4 (full screen) for Wolf RPG games off
+        if ("0".equals(cfg.getProperty("auto_f4", "").trim())) autoFullscreenF4 = false;
         // Unity writes its own log into the game folder (G: is the game folder)
         if (!gameArgs.contains("-logFile")) gameArgs = (gameArgs + " -logFile G:/AnyPlay-Player.log").trim();
         AnyPlayLog.write("test config: args=" + gameArgs + " screen=" + screenSize + " box64=" + box64Preset + " dxvk=" + (dxvkVersion.isEmpty() ? "default" : dxvkVersion));
@@ -271,6 +276,7 @@ public class LaunchActivity extends AppCompatActivity {
         intent.putExtra("container_id", container.id);
         intent.putExtra("exec_path", gamePath);
         intent.putExtra("exec_args", gameArgs);
+        if (autoFullscreenF4 && UnityZipExtractor.isWolfGameDir(gameDir)) intent.putExtra("auto_fullscreen_f4", true);
         // The on-screen gamepad layout is saved per game: the zip, or the game's folder.
         String gameKey = gameZip != null ? gameZip : (gameDirExtra != null ? gameDirExtra : gameDir.getPath());
         intent.putExtra("game_key", gameKey);
