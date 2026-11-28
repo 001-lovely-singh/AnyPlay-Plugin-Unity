@@ -140,12 +140,16 @@ public final class UnityZipExtractor {
     }
 
     /**
-     * Finds the Unity game's exe inside a folder: not UnityCrashHandler, and with a matching
-     * "<name>_Data" folder next to it. Also works when the game sits inside extra folders (up to 3 levels).
+     * Finds the game's exe inside a folder: for Unity, not UnityCrashHandler and with a matching
+     * "<name>_Data" folder next to it; for Wolf RPG, the game exe next to the "Data" folder.
+     * Also works when the game sits inside extra folders (up to 3 levels).
      */
     public static File locateExe(File root) {
         File strict = searchStrict(root, 0);
         if (strict != null) return strict;
+        // Wolf RPG Editor games (Game.exe / GamePro.exe + Config.exe + Data folder) have no "<name>_Data" folder.
+        File wolf = searchWolf(root, 0);
+        if (wolf != null) return wolf;
         File fallback = anyExe(root);
         if (fallback != null) return fallback;
         File[] subs = root.listFiles();
@@ -179,6 +183,49 @@ public final class UnityZipExtractor {
             }
         }
         return null;
+    }
+
+    /**
+     * Wolf RPG Editor game: a folder with a "Data" folder (holding "BasicData" or .wolf files) next to the game exe.
+     * The folder also has Config.exe (the settings tool), so the exe is the biggest one that is not a config/setup tool.
+     * Works for renamed exes too. Looks up to 3 levels deep.
+     */
+    private static File searchWolf(File dir, int depth) {
+        File[] files = dir.listFiles();
+        if (files == null) return null;
+        File data = null;
+        for (File f : files) {
+            if (f.isDirectory() && f.getName().equalsIgnoreCase("data")) { data = f; break; }
+        }
+        if (data != null && isWolfData(data)) {
+            File best = null;
+            for (File f : files) {
+                if (!isGameExe(f)) continue;
+                String n = f.getName().toLowerCase();
+                if (n.startsWith("config") || n.contains("uninst") || n.contains("setup")) continue;
+                if (best == null || f.length() > best.length()) best = f;
+            }
+            if (best != null) return best;
+        }
+        if (depth >= 3) return null;
+        for (File f : files) {
+            if (f.isDirectory()) {
+                File r = searchWolf(f, depth + 1);
+                if (r != null) return r;
+            }
+        }
+        return null;
+    }
+
+    private static boolean isWolfData(File data) {
+        File[] items = data.listFiles();
+        if (items == null) return false;
+        for (File f : items) {
+            String n = f.getName().toLowerCase();
+            if (f.isDirectory() && n.equals("basicdata")) return true;
+            if (f.isFile() && n.endsWith(".wolf")) return true;
+        }
+        return false;
     }
 
     private static File anyExe(File dir) {
